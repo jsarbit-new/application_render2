@@ -17,6 +17,16 @@ st.set_page_config(layout="wide", page_title="Dashboard Crédit")
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
+# --- Définition de palettes de couleurs daltonisme-compatibles personnalisées ---
+# Ces couleurs sont choisies pour un bon contraste et sont généralement sûres pour le daltonisme
+COLOR_ACCORDE = '#1f77b4'  # Bleu distinctif
+COLOR_DEFAUT = '#ff7f0e'   # Orange distinctif
+COLOR_BAR_GLOBAL = '#2ca02c' # Vert pour les barres d'importance globale (si utilisé)
+COLOR_GAUGE_ACCORDE = '#1f77b4' # Bleu pour la jauge
+COLOR_GAUGE_DEFAUT = '#ff7f0e' # Orange pour la jauge
+COLOR_CLIENT_HIGHLIGHT = 'red' # Rouge pour la position du client (clairement visible)
+
+
 # Constantes et variables d'environnement
 BUCKET_NAME = os.getenv('AWS_S3_BUCKET_NAME')
 S3_PREFIX_DATA = "input/"
@@ -38,6 +48,9 @@ if 'simulation_features' not in st.session_state:
     st.session_state['simulation_features'] = None
 if 'selected_features_client' not in st.session_state:
     st.session_state['selected_features_client'] = []
+# Ajout pour la simulation si elle n'existait pas encore
+if 'selected_features_sim' not in st.session_state:
+    st.session_state['selected_features_sim'] = []
 
 # --- Helpers S3 ---
 @st.cache_resource
@@ -72,6 +85,7 @@ def load_s3_parquet(_s3, key):
 def create_interactive_distribution_plot(df, feature, client_value, title):
     """
     Crée un histogramme interactif avec 2 distributions superposées et la ligne du client.
+    Améliorations WCAG: Utilisation de couleurs daltonisme-compatibles.
     """
     df_plot = df.dropna(subset=[feature])
     df_accord = df_plot[df_plot['TARGET'] == 0]
@@ -81,20 +95,22 @@ def create_interactive_distribution_plot(df, feature, client_value, title):
 
     fig.add_trace(go.Histogram(
         x=df_accord[feature],
-        name='Prêts Accordés',
-        marker_color='green',
+        name='Prêts Accordés (TARGET = 0)',
+        marker_color=COLOR_ACCORDE, # Utilisation de la couleur définie
         opacity=0.7
     ))
 
     fig.add_trace(go.Histogram(
         x=df_defaut[feature],
-        name='Prêts en Défaut',
-        marker_color='red',
+        name='Prêts en Défaut (TARGET = 1)',
+        marker_color=COLOR_DEFAUT, # Utilisation de la couleur définie
         opacity=0.7
     ))
 
     # Ajouter la ligne pour la valeur du client
-    fig.add_vline(x=client_value, line_dash="dash", line_color="black", annotation_text="Valeur du client", annotation_position="top right")
+    fig.add_vline(x=client_value, line_dash="dash", line_color=COLOR_CLIENT_HIGHLIGHT, 
+                  annotation_text="Valeur du client", annotation_position="top right",
+                  annotation_font_color=COLOR_CLIENT_HIGHLIGHT) # Couleur pour le texte de l'annotation
 
     # Mise à jour du layout
     fig.update_layout(
@@ -102,14 +118,16 @@ def create_interactive_distribution_plot(df, feature, client_value, title):
         title=f"Distribution de '{feature}'",
         xaxis_title=feature,
         yaxis_title="Nombre de clients",
-        legend_title="Légende"
+        legend_title="Statut du Prêt", # Légende plus explicite
+        height=350, # Hauteur fixe pour cohérence
     )
 
     return fig
 
 def create_bivariate_plot(df, feature_x, feature_y, client_value_x, client_value_y, title):
     """
-    Crée un graphique de dispersion bivarié.
+    Crée un graphique de dispersion bivarié avec des couleurs et symboles daltonisme-compatibles.
+    Améliorations WCAG: Couleurs discrètes, symboles différents pour TARGET, légende claire.
     """
     df_plot = df.dropna(subset=[feature_x, feature_y])
     
@@ -117,22 +135,38 @@ def create_bivariate_plot(df, feature_x, feature_y, client_value_x, client_value
                      x=feature_x,
                      y=feature_y,
                      color='TARGET',
-                     color_continuous_scale=px.colors.sequential.Viridis,
+                     symbol='TARGET', # Utilisation de symboles différents (cercle pour 0, croix pour 1)
+                     color_discrete_map={0: COLOR_ACCORDE, 1: COLOR_DEFAUT}, # Couleurs définies globalement
                      title=title,
-                     labels={'TARGET': 'Prêt Accordé (0) / Défaut (1)'},
+                     labels={'TARGET': 'Statut du prêt (0=Accordé, 1=Défaut)'}, # Labels explicites
                      hover_data=['TARGET'])
 
+    # Ajustement des marqueurs et de la légende pour être plus descriptifs et accessibles
+    fig.update_traces(marker=dict(size=8, line=dict(width=0.5, color='DarkSlateGrey')),
+                      selector=dict(mode='markers'))
+    fig.update_layout(
+        legend_title_text='Statut du Prêt',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+
+    # Ajout du point pour le client/simulation
     fig.add_trace(go.Scatter(
         x=[client_value_x],
         y=[client_value_y],
         mode='markers',
         marker=dict(
-            color='red',
+            color=COLOR_CLIENT_HIGHLIGHT, # Point du client reste rouge pour le distinguer clairement
             size=15,
             symbol='star',
             line=dict(width=2, color='white')
         ),
-        name='Position du client'
+        name='Position du client' # Ajout d'un nom pour la légende du client
     ))
     
     fig.update_layout(height=450)
@@ -162,7 +196,7 @@ def display_client_analysis(client_id, X_train_raw):
     client_data_raw = X_train_raw.loc[[client_id]].drop(columns=['TARGET'], errors='ignore')
 
     # Simulation de la probabilité de défaut pour la démo
-    proba = 0.55
+    proba = 0.55 # Maintenu pour la démo
     
     col_score, col_explication = st.columns([1, 2])
     with col_score:
@@ -171,6 +205,7 @@ def display_client_analysis(client_id, X_train_raw):
         decision = "Refusé" if proba > threshold else "Accordé"
         st.write(f"**Décision :** {decision}")
         
+        # Jauge de score améliorée avec les couleurs définies
         fig_gauge = go.Figure(
             go.Indicator(
                 mode="gauge+number",
@@ -178,9 +213,9 @@ def display_client_analysis(client_id, X_train_raw):
                 domain={'x': [0, 1], 'y': [0, 1]},
                 title={'text': "Score de Risque de Défaut", 'font': {'size': 20}},
                 gauge={'axis': {'range': [None, 100]},
-                       'bar': {'color': "darkblue"},
-                       'steps': [{'range': [0, threshold * 100], 'color': "#00ff7f"},
-                                 {'range': [threshold * 100, 100], 'color': "#ff6347"}],
+                       'bar': {'color': "darkblue"}, # Couleur de la barre de progression
+                       'steps': [{'range': [0, threshold * 100], 'color': COLOR_GAUGE_ACCORDE}, # Bleu pour Accordé
+                                 {'range': [threshold * 100, 100], 'color': COLOR_GAUGE_DEFAUT}], # Orange pour Refusé
                        'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': threshold * 100}}
             )
         )
@@ -204,7 +239,7 @@ def display_client_analysis(client_id, X_train_raw):
         )
         submit_comparison = st.form_submit_button("Afficher les graphiques")
     
-    if submit_comparison or st.session_state['client_multiselect']:
+    if submit_comparison or (st.session_state['client_multiselect'] and st.session_state['selected_features_client'] == features_to_compare):
         st.session_state['selected_features_client'] = features_to_compare
         if len(st.session_state['selected_features_client']) == 2:
             feature1, feature2 = st.session_state['selected_features_client']
@@ -283,7 +318,7 @@ def display_simulator(client_id, X_train_raw):
         st.markdown("### **Résultat de la simulation**")
         
         # Simulation d'un score
-        sim_proba = 0.45
+        sim_proba = 0.45 # Maintenu pour la démo
         
         col_score_sim, col_explication_sim = st.columns([1, 2])
         with col_score_sim:
@@ -298,24 +333,22 @@ def display_simulator(client_id, X_train_raw):
         st.markdown("---")
         st.markdown("#### Profil simulé vs. Population")
         
-        # Réutilise la même logique de graphique que l'onglet 'Analyse Client'
-        # On utilise le même `multiselect` et les mêmes variables
         feature_options = X_train_raw.drop(columns=['TARGET'], errors='ignore').columns.tolist()
         
         with st.form("simulation_comparison_form"):
-            features_to_compare = st.multiselect(
+            features_to_compare_sim = st.multiselect(
                 "Sélectionnez 2 features à afficher :",
                 options=feature_options,
-                default=st.session_state.get('selected_features_client', []),
+                default=st.session_state.get('selected_features_sim', []), # Utilisation de 'selected_features_sim'
                 max_selections=2,
                 key='sim_multiselect'
             )
             submit_sim_comparison = st.form_submit_button("Afficher les graphiques de simulation")
 
-        if submit_sim_comparison or st.session_state['sim_multiselect']:
-            st.session_state['selected_features_client'] = features_to_compare
-            if len(st.session_state['selected_features_client']) == 2:
-                feature1, feature2 = st.session_state['selected_features_client']
+        if submit_sim_comparison or (st.session_state['sim_multiselect'] and st.session_state['selected_features_sim'] == features_to_compare_sim):
+            st.session_state['selected_features_sim'] = features_to_compare_sim
+            if len(st.session_state['selected_features_sim']) == 2:
+                feature1, feature2 = st.session_state['selected_features_sim']
                 
                 # Pour le simulateur, on utilise les valeurs du formulaire
                 sim_value1 = st.session_state['simulation_features'].get(feature1, X_train_raw[feature1].mean())
@@ -346,14 +379,19 @@ def main():
         s3 = init_s3()
         if s3 is None:
             return
-        
+            
         try:
             X_train_raw = load_s3_parquet(s3, "X_train.parquet")
             y_train = load_s3_parquet(s3, "y_train.parquet")
             if X_train_raw is None or y_train is None:
                 return
-            
+                
             if 'TARGET' not in X_train_raw.columns:
+                # S'assurer que les index sont alignés avant le merge
+                if not X_train_raw.index.equals(y_train.index):
+                    # Tentez un reset_index si les index ne sont pas alignés
+                    X_train_raw = X_train_raw.reset_index(drop=True)
+                    y_train = y_train.reset_index(drop=True)
                 X_train_raw = X_train_raw.merge(y_train, left_index=True, right_index=True)
 
         except Exception as e:
@@ -365,8 +403,21 @@ def main():
 
     # Sidebar pour la sélection du client
     st.sidebar.header("Sélection Client")
-    client_id_list = X_train_raw.index.tolist()
-    client_id = st.sidebar.selectbox("Sélectionnez un ID client:", client_id_list, index=0)
+    # Vérifiez si 'SK_ID_CURR' est dans les colonnes ou si l'index est l'ID client
+    if 'SK_ID_CURR' in X_train_raw.columns:
+        # Si 'SK_ID_CURR' est une colonne, nous devons l'utiliser comme index pour les loc futurs
+        if X_train_raw.index.name != 'SK_ID_CURR':
+            X_train_raw = X_train_raw.set_index('SK_ID_CURR')
+        client_id_list = X_train_raw.index.tolist()
+    else:
+        client_id_list = X_train_raw.index.tolist()
+    
+    # Assurez-vous que l'index par défaut pour selectbox est valide
+    if client_id_list:
+        client_id = st.sidebar.selectbox("Sélectionnez un ID client:", client_id_list, index=0)
+    else:
+        st.error("Aucun ID client disponible dans les données de formation.")
+        return
     
     if st.sidebar.button("Lancer l'analyse complète"):
         st.session_state['client_analysis_submitted'] = True
@@ -375,6 +426,7 @@ def main():
         st.session_state['simulation_submitted'] = False
         st.session_state['last_client_id'] = client_id
         st.session_state['selected_features_client'] = []
+        st.session_state['selected_features_sim'] = [] # Réinitialiser aussi pour le simulateur
 
     tab1, tab2 = st.tabs(["🔍 Analyse Client", "🧮 Simulateur"])
     

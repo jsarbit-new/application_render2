@@ -4,7 +4,7 @@ Fichier Readme.md
 
 
 
-1. dashboard-b4.py
+1. dashboard-b6.py
 
 Ce script est la version complète et en temps réel de l'application Streamlit.
 
@@ -18,7 +18,7 @@ Ce script est la version complète et en temps réel de l'application Streamlit.
 
     Exécution : Ce script n'est pas conçu pour les services cloud gratuits. Il doit être exécuté via une console Python sur un ordinateur local, avec les secrets de connexion au bucket AWS S3 correctement définis.
 
-2. dashboard-b5.py
+2. dashboard-b6-render.py
 
 Ce script est une version optimisée pour le déploiement sur la plateforme gratuite RENDER. Pour surmonter les limitations de l'offre gratuite, certaines fonctionnalités ont été pré-calculées.
 

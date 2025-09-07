@@ -27,7 +27,14 @@ from bokeh.models import ColumnDataSource, HoverTool, Legend
 from bokeh.embed import file_html
 from bokeh.resources import CDN
 from bokeh.layouts import gridplot
-from bokeh.palettes import Magma, Viridis
+
+# --- Définition de palettes de couleurs daltonisme-compatibles personnalisées ---
+# Ces couleurs sont choisies pour un bon contraste et sont généralement sûres pour le daltonisme
+COLOR_ACCORDE = '#1f77b4' # Bleu distinctif
+COLOR_DEFAUT = '#ff7f0e'  # Orange distinctif
+COLOR_BAR_GLOBAL = '#2ca02c' # Vert pour les barres d'importance globale
+COLOR_GAUGE_ACCORDE = '#1f77b4' # Bleu pour la jauge
+COLOR_GAUGE_DEFAUT = '#ff7f0e' # Orange pour la jauge
 
 # Supprimer les avertissements pour une meilleure lisibilité
 warnings.filterwarnings('ignore', category=UserWarning, module='shap')
@@ -151,13 +158,15 @@ def generate_global_shap_data(_explainer, _data):
 # --- Fonctions pour les sections de l'UI ---
 
 def create_interactive_bar_plot(feature_importance_df, title="Importance moyenne globale des features"):
-    """Crée un graphique à barres interactif avec Bokeh."""
+    """Crée un graphique à barres interactif avec Bokeh.
+    Utilisation d'une palette de couleurs adaptée au daltonisme."""
     source = ColumnDataSource(feature_importance_df)
     p = figure(x_range=feature_importance_df['feature'], height=350, title=title,
                tools="pan,box_zoom,reset,save", toolbar_location="above")
     
+    # Utilisation de la couleur définie globalement
     p.vbar(x='feature', top='importance', width=0.9, source=source, 
-           color="#007bff", legend_label="Importance moyenne")
+           color=COLOR_BAR_GLOBAL, legend_label="Importance moyenne")
 
     p.add_tools(HoverTool(
         tooltips=[("Feature", "@feature"), ("Importance", "@importance{0.2f}")]
@@ -169,44 +178,55 @@ def create_interactive_bar_plot(feature_importance_df, title="Importance moyenne
     p.xaxis.axis_label = "Fonctionnalité"
     p.yaxis.axis_label = "Importance moyenne SHAP"
     
+    # Améliorations de la légende pour l'accessibilité
+    p.legend.label_text_font_size = "10pt"
+    p.legend.label_text_color = "black"
+    p.legend.background_fill_alpha = 0.7
+    
     return p
 
 def create_interactive_distribution_plot(df, feature, client_value):
     """
     Crée un histogramme interactif avec 2 distributions superposées et la ligne du client.
-    df: DataFrame contenant les features et la colonne 'TARGET'.
-    feature: Nom de la feature à visualiser.
-    client_value: Valeur de cette feature pour le client sélectionné.
+    Améliorations WCAG: Utilisation de couleurs daltonisme-compatibles (sans hachures).
+    La clarté de la légende est cruciale ici.
     """
-    # Séparer les données en deux groupes
     df_accord = df[df['TARGET'] == 0]
     df_defaut = df[df['TARGET'] == 1]
     
-    # Définir les limites et les bins
     bins = 25
     min_val = df[feature].min()
     max_val = df[feature].max()
     
-    # Calculer les histogrammes pour chaque groupe
     hist_accord, edges_accord = np.histogram(df_accord[feature].dropna(), bins=bins, range=(min_val, max_val))
     hist_defaut, edges_defaut = np.histogram(df_defaut[feature].dropna(), bins=bins, range=(min_val, max_val))
     
-    # Créer le graphique
     p = figure(height=300, title=f"Distribution de '{feature}'",
                tools="pan,box_zoom,reset,save")
     
-    # Créer les barres d'histogramme pour le groupe "Accordé"
+    # Utilisation des couleurs définies globalement
+    
+    # Prêts Accordés (TARGET=0)
     p.quad(top=hist_accord, bottom=0, left=edges_accord[:-1], right=edges_accord[1:],
-           fill_color="green", legend_label="Prêts Accordés", line_color="white", alpha=0.7)
-           
-    # Créer les barres d'histogramme pour le groupe "Défaut"
+           fill_color=COLOR_ACCORDE,
+           legend_label="Prêts Accordés (TARGET = 0)", line_color="white", alpha=0.8)
+            
+    # Prêts en Défaut (TARGET=1)
     p.quad(top=hist_defaut, bottom=0, left=edges_defaut[:-1], right=edges_defaut[1:],
-           fill_color="red", legend_label="Prêts en Défaut", line_color="white", alpha=0.7)
+           fill_color=COLOR_DEFAUT,
+           legend_label="Prêts en Défaut (TARGET = 1)", line_color="white", alpha=0.8)
     
-    # Ajouter la ligne pour la valeur du client
-    max_hist = max(np.max(hist_accord), np.max(hist_defaut))
-    p.line(x=[client_value, client_value], y=[0, max_hist * 1.1], line_color="black", line_width=3, line_dash="dashed", legend_label="Valeur du client")
+    # Ligne du client
+    max_hist = max(np.max(hist_accord) if len(hist_accord) > 0 else 0,
+                   np.max(hist_defaut) if len(hist_defaut) > 0 else 0)
     
+    if max_hist > 0:
+        p.line(x=[client_value, client_value], y=[0, max_hist * 1.1], line_color="black", line_width=3, line_dash="dashed", legend_label="Valeur du client")
+    else:
+        # Gérer le cas où il n'y a pas de données d'histogramme, mais une valeur client à montrer
+        st.warning(f"Aucune donnée d'histogramme pour la feature '{feature}'. Affichage de la valeur du client uniquement.")
+        p.scatter(x=[client_value], y=[0], marker='dot', size=10, color='black', legend_label="Valeur du client")
+
     # Configuration supplémentaire
     p.xaxis.axis_label = feature
     p.yaxis.axis_label = "Nombre de clients"
@@ -216,29 +236,44 @@ def create_interactive_distribution_plot(df, feature, client_value):
         tooltips=[("Plage", "$x"), ("Nb. clients", "$y")]
     ))
     
+    # Améliorer l'accessibilité de la légende
+    p.legend.label_text_font_size = "10pt"
+    p.legend.label_text_color = "black"
+    p.legend.background_fill_alpha = 0.7
+    
     return p
 
 def create_bivariate_plot(df, feature_x, feature_y, client_value_x, client_value_y, title):
     """
-    Crée un graphique de dispersion bivarié avec un dégradé de couleurs et la position du client/simulation.
-    df: DataFrame contenant les features et les SHAP values moyennes.
-    feature_x, feature_y: Les deux features à visualiser.
-    client_value_x, client_value_y: Valeurs des features pour le client/simulation.
-    title: Titre du graphique.
+    Crée un graphique de dispersion bivarié avec des couleurs et symboles daltonisme-compatibles.
+    Améliorations WCAG: Couleurs discrètes, symboles différents pour TARGET.
     """
-    
-    # Pour éviter le warning de Plotly, on s'assure que les features sont dans le DataFrame
     df_plot = df.dropna(subset=[feature_x, feature_y])
     
-    # Création du nuage de points avec un dégradé de couleurs basé sur TARGET
+    # Création du nuage de points avec des couleurs discrètes et des symboles différents pour TARGET
     fig = px.scatter(df_plot,
                      x=feature_x,
                      y=feature_y,
                      color='TARGET',
-                     color_continuous_scale=px.colors.sequential.Viridis,
+                     symbol='TARGET', # Utilisation de symboles différents (cercle pour 0, croix pour 1)
+                     color_discrete_map={0: COLOR_ACCORDE, 1: COLOR_DEFAUT}, # Couleurs définies globalement
                      title=title,
-                     labels={'TARGET': 'Prêt Accordé (0) / Défaut (1)'},
+                     labels={'TARGET': 'Statut du prêt (0=Accordé, 1=Défaut)'},
                      hover_data=['TARGET'])
+
+    # Ajustement des marqueurs et de la légende pour être plus descriptifs et accessibles
+    fig.update_traces(marker=dict(size=8, line=dict(width=0.5, color='DarkSlateGrey')),
+                      selector=dict(mode='markers'))
+    fig.update_layout(
+        legend_title_text='Statut du Prêt',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
 
     # Ajout du point pour le client/simulation
     fig.add_trace(go.Scatter(
@@ -246,12 +281,12 @@ def create_bivariate_plot(df, feature_x, feature_y, client_value_x, client_value
         y=[client_value_y],
         mode='markers',
         marker=dict(
-            color='red',
+            color='red', # Point du client reste rouge pour le distinguer clairement
             size=15,
             symbol='star',
             line=dict(width=2, color='white')
         ),
-        name='Position du client'
+        name='Position du client' # Ajout d'un nom pour la légende du client
     ))
     
     fig.update_layout(height=450)
@@ -263,7 +298,8 @@ def display_client_analysis(client_id, X_train_raw, X_train_processed_df, predic
     st.subheader(f"Analyse du dossier client n°{client_id}")
     st.markdown("---")
 
-    client_data_raw = X_train_raw.loc[[client_id]].drop(columns=['TARGET'])
+    # Assurez-vous que 'TARGET' est bien retiré si présent dans les données brutes
+    client_data_raw = X_train_raw.loc[[client_id]].drop(columns=['TARGET'], errors='ignore')
     
     with st.spinner("Calcul en cours..."):
         proba = prediction_pipeline.predict_proba(client_data_raw)[0][1]
@@ -287,8 +323,8 @@ def display_client_analysis(client_id, X_train_raw, X_train_processed_df, predic
                 title={'text': "Score de Risque de Défaut", 'font': {'size': 20}},
                 gauge={'axis': {'range': [None, 100]},
                        'bar': {'color': "darkblue"},
-                       'steps': [{'range': [0, threshold * 100], 'color': "#00ff7f"},
-                                 {'range': [threshold * 100, 100], 'color': "#ff6347"}],
+                       'steps': [{'range': [0, threshold * 100], 'color': COLOR_GAUGE_ACCORDE}, # Bleu pour Accordé
+                                 {'range': [threshold * 100, 100], 'color': COLOR_GAUGE_DEFAUT}], # Orange pour Refusé
                        'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': threshold * 100}}
             )
         )
@@ -352,8 +388,9 @@ def display_client_analysis(client_id, X_train_raw, X_train_processed_df, predic
     
     if len(st.session_state.get('selected_features_client', [])) == 2:
         feature1, feature2 = st.session_state['selected_features_client']
-        client_value1 = client_data_raw.loc[client_id, feature1]
-        client_value2 = client_data_raw.loc[client_id, feature2]
+        client_data_raw_for_plot = X_train_raw.loc[[client_id]].drop(columns=['TARGET'], errors='ignore')
+        client_value1 = client_data_raw_for_plot.loc[client_id, feature1]
+        client_value2 = client_data_raw_for_plot.loc[client_id, feature2]
 
         st.markdown("##### 1. Distributions univariées")
         bokeh_plots = []
@@ -391,7 +428,13 @@ def display_simulator(client_id, X_train_raw, X_train_processed_df, prediction_p
     }
     
     if 'simulated_features' not in st.session_state or st.session_state.client_id_selected != client_id:
-        default_values = X_train_raw.loc[[client_id]].squeeze().to_dict()
+        # Assurez-vous que client_id est dans l'index de X_train_raw avant de tenter de le loc
+        if client_id in X_train_raw.index:
+            default_values = X_train_raw.loc[[client_id]].squeeze().to_dict()
+        else:
+            # Fallback si l'ID client n'est pas trouvé (peu probable avec selectbox)
+            default_values = {col: X_train_raw[col].mean() for col in simulation_features_dict.keys() if col in X_train_raw.columns}
+
         st.session_state.simulated_features = {
             col: default_values.get(col, X_train_raw[col].mean()) for col in simulation_features_dict.keys() if col in X_train_raw.columns
         }
@@ -429,9 +472,16 @@ def display_simulator(client_id, X_train_raw, X_train_processed_df, prediction_p
             sim_data_raw = pd.DataFrame([st.session_state['simulation_features']])
             sim_data_raw = sim_data_raw.astype(X_train_raw[list(st.session_state['simulation_features'].keys())].dtypes)
             
-            full_sim_data = X_train_raw.iloc[0:1].drop(columns=['TARGET']).copy()
-            for feat, val in st.session_state['simulation_features'].items():
-                full_sim_data.loc[full_sim_data.index[0], feat] = val
+            # Créer un DataFrame avec toutes les colonnes attendues par le pipeline
+            full_sim_data = X_train_raw.iloc[0:1].drop(columns=['TARGET']).copy() # Utilise le format du train_raw
+            # Assurez-vous que toutes les colonnes sont présentes et que les types sont corrects
+            for col in full_sim_data.columns:
+                if col in st.session_state['simulation_features']:
+                    full_sim_data.loc[full_sim_data.index[0], col] = st.session_state['simulation_features'][col]
+                else:
+                    # Gérer les colonnes non simulées (par exemple, prendre la moyenne de X_train_raw)
+                    full_sim_data.loc[full_sim_data.index[0], col] = X_train_raw[col].mean()
+
 
             proba = prediction_pipeline.predict_proba(full_sim_data)[0][1]
             sim_data_processed = preprocessor.transform(full_sim_data)
@@ -455,6 +505,7 @@ def display_simulator(client_id, X_train_raw, X_train_processed_df, prediction_p
                 for i in sorted_indices[:5]:
                     feature_name = shap_values[0].feature_names[i]
                     shap_value = top_features_values[i]
+                    # S'assurer que la feature_value est récupérée correctement pour la simulation
                     feature_value = full_sim_data[feature_name].iloc[0]
                     impact_emoji = "📈" if shap_value > 0 else "📉"
                     impact_text = "augmente le risque" if shap_value > 0 else "diminue le risque"
@@ -535,9 +586,13 @@ def main():
             return
             
         if 'TARGET' not in X_train_raw.columns:
-            if not pd.api.types.is_integer_dtype(X_train_raw.index):
-                 X_train_raw = X_train_raw.reset_index(drop=True).set_index(X_train_raw.index)
+            # S'assurer que les index sont alignés avant le merge
+            # Réinitialiser les index si ce ne sont pas les mêmes
+            if not X_train_raw.index.equals(y_train.index):
+                X_train_raw = X_train_raw.reset_index(drop=True)
+                y_train = y_train.reset_index(drop=True)
             X_train_raw = X_train_raw.merge(y_train, left_index=True, right_index=True)
+
 
         explainer_model, X_train_processed_df = train_explainer_model(preprocessor, X_train_raw.drop(columns=['TARGET']), y_train)
         explainer = create_explainer(explainer_model, X_train_processed_df)
@@ -548,9 +603,22 @@ def main():
 
     # Sidebar pour la sélection du client
     st.sidebar.header("Sélection Client")
-    client_id_list = X_train_raw.index.tolist()
-    client_id = st.sidebar.selectbox("Sélectionnez un ID client:", client_id_list, index=0)
+    # Vérifiez si 'SK_ID_CURR' est dans les colonnes ou si l'index est l'ID client
+    if 'SK_ID_CURR' in X_train_raw.columns:
+        # Si 'SK_ID_CURR' est une colonne, nous devons l'utiliser comme index pour les loc futurs
+        if X_train_raw.index.name != 'SK_ID_CURR':
+            X_train_raw = X_train_raw.set_index('SK_ID_CURR')
+        client_id_list = X_train_raw.index.tolist()
+    else:
+        client_id_list = X_train_raw.index.tolist()
     
+    # Assurez-vous que l'index par défaut pour selectbox est valide
+    if client_id_list:
+        client_id = st.sidebar.selectbox("Sélectionnez un ID client:", client_id_list, index=0)
+    else:
+        st.error("Aucun ID client disponible dans les données de formation.")
+        return
+
     if st.sidebar.button("Lancer l'analyse complète"):
         st.session_state['client_analysis_submitted'] = True
     
